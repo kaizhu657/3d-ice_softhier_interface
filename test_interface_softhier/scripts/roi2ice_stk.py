@@ -108,7 +108,7 @@ solver:
    numofcores 8 ;   
 
 output:
-     Tflp( TOP_DIE,    "../results/output_top_die_flp_avg.txt",    average, slot );
+     Tflp( TOP_DIE,    "output_top_die_flp_avg.txt",    average, slot );
 
 """
 
