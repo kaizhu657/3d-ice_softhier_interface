@@ -294,6 +294,32 @@ Error_t generate_output
 
 /******************************************************************************/
 
+Error_t fill_output_geometry_message
+(
+    Output_t         *output,
+    Dimensions_t     *dimensions,
+    NetworkMessage_t *message
+)
+{
+    InspectionPointListNode_t *ipn ;
+
+    for (ipn  = inspection_point_list_begin (&output->InspectionPointListSlot) ;
+         ipn != NULL ;
+         ipn  = inspection_point_list_next (ipn))
+    {
+        InspectionPoint_t *ipoint = inspection_point_list_data (ipn) ;
+
+        if (is_inspection_point
+            (ipoint, TDICE_OUTPUT_TYPE_TMAP, TDICE_OUTPUT_QUANTITY_NONE) == true)
+
+            fill_message_tmap_geometry (ipoint, dimensions, message) ;
+    }
+
+    return TDICE_SUCCESS ;
+}
+
+/******************************************************************************/
+
 Error_t fill_output_message
 (
     Output_t         *output,

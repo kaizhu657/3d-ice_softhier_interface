@@ -619,9 +619,11 @@ extern "C"
          * if OutputType_t is Tflp (nflp is its number of floorplan elements).
          * filename and header are packed as MessageWord_t chunks.
          *
-         * | nrows | ncolumns | T 1 | ... | T (nrows x ncolumns) |
+         * | T 1 | ... | T (nrows x ncolumns) |
          *
-         * if OutputType_t is Tmap.
+         * if OutputType_t is Tmap. Filename and dimensions are provided once
+         * by TDICE_SEND_OUTPUT_GEOMETRY, and temperatures use that row-major
+         * cell order.
          *
          * | nrows | ncolumns | S 1 | ... | S (nrows x ncolumns) |
          *
@@ -725,6 +727,24 @@ extern "C"
          */
 
         TDICE_SEND_OUTPUT_FILES,
+
+
+
+        /*! \brief Request static geometry for Tmap outputs
+         *
+         * The client sends a message without payload :
+         *
+         * | 2 | TDICE_SEND_OUTPUT_GEOMETRY |
+         *
+         * The server sends back geometry for all slot Tmap outputs declared in
+         * the stack output section:
+         *
+         * | length | TDICE_SEND_OUTPUT_GEOMETRY | nresults |
+         * | filename_length | nrows | ncolumns | filename bytes |
+         * | left_x | left_y | length | width | ...
+         */
+
+        TDICE_SEND_OUTPUT_GEOMETRY,
     } ;
 
 

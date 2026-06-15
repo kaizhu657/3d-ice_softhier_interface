@@ -477,6 +477,43 @@ int main (int argc, char** argv)
 
         /**********************************************************************/
 
+            case TDICE_SEND_OUTPUT_GEOMETRY :
+            {
+                network_message_init (&reply) ;
+                build_message_head   (&reply, TDICE_SEND_OUTPUT_GEOMETRY) ;
+
+                Quantity_t n = get_number_of_inspection_points
+
+                    (&output, TDICE_OUTPUT_INSTANT_SLOT,
+                     TDICE_OUTPUT_TYPE_TMAP, TDICE_OUTPUT_QUANTITY_NONE) ;
+
+                insert_message_word (&reply, &n) ;
+
+                if (n > 0)
+                {
+                    error = fill_output_geometry_message
+
+                        (&output, stkd.Dimensions, &reply) ;
+
+                    if (error != TDICE_SUCCESS)
+                    {
+                        fprintf (stderr, "error: generate geometry message content\n") ;
+
+                        network_message_destroy (&reply) ;
+
+                        goto sim_error ;
+                    }
+                }
+
+                send_message_to_socket (&client_socket, &reply) ;
+
+                network_message_destroy (&reply) ;
+
+                break ;
+            }
+
+        /**********************************************************************/
+
             case TDICE_PRINT_OUTPUT :
             {
                 OutputInstant_t  instant ;

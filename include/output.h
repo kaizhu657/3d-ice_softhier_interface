@@ -235,6 +235,15 @@ extern "C"
      * \return \c TDICE_FAILURE if one of the output cannot be generated
      */
 
+    Error_t fill_output_geometry_message
+    (
+        Output_t         *output,
+        Dimensions_t     *dimensions,
+        NetworkMessage_t *message
+    ) ;
+
+
+
     Error_t fill_output_message
     (
         Output_t         *output,

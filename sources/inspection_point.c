@@ -1114,6 +1114,80 @@ error:
 
 /******************************************************************************/
 
+void fill_message_tmap_geometry
+(
+    InspectionPoint_t *ipoint,
+    Dimensions_t      *dimensions,
+    NetworkMessage_t  *message
+)
+{
+    Quantity_t file_name_length = (Quantity_t) strlen (ipoint->FileName) ;
+
+    insert_message_word  (message, &file_name_length) ;
+
+    if (dimensions->NonUniform == 1)
+    {
+        CellIndex_t nrows = 1u ;
+        CellIndex_t ncolumns = get_non_uniform_layer_cell_count
+
+            (ipoint->StackElement, dimensions) ;
+
+        insert_message_word (message, &nrows) ;
+        insert_message_word (message, &ncolumns) ;
+        insert_message_bytes (message, (unsigned char *) ipoint->FileName, file_name_length) ;
+
+        CellIndex_t layer_offset = get_source_layer_offset (ipoint->StackElement) ;
+
+        for (Non_uniform_cellListNode_t *cell_i = dimensions->Cell_list.First ;
+             cell_i != NULL ;
+             cell_i = cell_i->Next)
+        {
+            if (cell_i->Data.layer_info == layer_offset)
+            {
+                float left_x      = (float) cell_i->Data.left_x ;
+                float left_y      = (float) cell_i->Data.left_y ;
+                float cell_length = (float) cell_i->Data.length ;
+                float cell_width  = (float) cell_i->Data.width ;
+
+                insert_message_word (message, &left_x) ;
+                insert_message_word (message, &left_y) ;
+                insert_message_word (message, &cell_length) ;
+                insert_message_word (message, &cell_width) ;
+            }
+        }
+    }
+    else
+    {
+        CellIndex_t nrows = get_number_of_rows (dimensions) ;
+        CellIndex_t ncolumns = get_number_of_columns (dimensions) ;
+
+        insert_message_word (message, &nrows) ;
+        insert_message_word (message, &ncolumns) ;
+        insert_message_bytes (message, (unsigned char *) ipoint->FileName, file_name_length) ;
+
+        CellIndex_t row ;
+        CellIndex_t column ;
+
+        for (row = first_row (dimensions) ; row <= last_row  (dimensions) ; row++)
+        {
+            for (column = first_column (dimensions) ; column <= last_column (dimensions) ; column++)
+            {
+                float left_x      = (float) get_cell_location_x (dimensions, column) ;
+                float left_y      = (float) get_cell_location_y (dimensions, row) ;
+                float cell_length = (float) get_cell_length (dimensions, column) ;
+                float cell_width  = (float) get_cell_width (dimensions, row) ;
+
+                insert_message_word (message, &left_x) ;
+                insert_message_word (message, &left_y) ;
+                insert_message_word (message, &cell_length) ;
+                insert_message_word (message, &cell_width) ;
+            }
+        }
+    }
+}
+
+/******************************************************************************/
+
 void fill_message_inspection_point
 (
     InspectionPoint_t *ipoint,
@@ -1282,14 +1356,6 @@ void fill_message_inspection_point
         {
             if (dimensions->NonUniform == 1)
             {
-                CellIndex_t n = 1u ;
-
-                insert_message_word (message, &n) ;
-
-                n = get_non_uniform_layer_cell_count (ipoint->StackElement, dimensions) ;
-
-                insert_message_word (message, &n) ;
-
                 Quantity_t index = 0u ;
                 CellIndex_t layer_offset = get_source_layer_offset (ipoint->StackElement) ;
 
@@ -1307,16 +1373,6 @@ void fill_message_inspection_point
             }
             else
             {
-                CellIndex_t n ;
-
-                n = get_number_of_rows (dimensions) ;
-
-                insert_message_word (message, &n) ;
-
-                n = get_number_of_columns (dimensions) ;
-
-                insert_message_word (message, &n) ;
-
                 Quantity_t index = get_cell_offset_in_stack
 
                     (dimensions,

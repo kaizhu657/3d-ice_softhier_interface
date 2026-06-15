@@ -327,6 +327,15 @@ extern "C"
      * \param message the message to fill
      */
 
+    void fill_message_tmap_geometry
+    (
+        InspectionPoint_t *ipoint,
+        Dimensions_t      *dimensions,
+        NetworkMessage_t  *message
+    ) ;
+
+
+
     void fill_message_inspection_point
     (
         InspectionPoint_t *ipoint,

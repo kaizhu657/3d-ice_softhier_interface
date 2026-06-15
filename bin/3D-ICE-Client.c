@@ -72,6 +72,35 @@ void seed_random ()
 #define MAX_SERVER_IP 50
 #define TERMINATION_SENTINEL (-1.0f)
 
+typedef struct TmapOutputMetadata_t
+{
+    char       *FileName ;
+    char       *GeometryFileName ;
+    CellIndex_t NRows ;
+    CellIndex_t NColumns ;
+    Quantity_t NCells ;
+
+} TmapOutputMetadata_t ;
+
+static TmapOutputMetadata_t *TmapOutputs = NULL ;
+static Quantity_t TmapOutputCount = 0u ;
+
+static void free_tmap_output_metadata (void)
+{
+    Quantity_t index ;
+
+    for (index = 0u ; index != TmapOutputCount ; index++)
+    {
+        free (TmapOutputs [index].FileName) ;
+        free (TmapOutputs [index].GeometryFileName) ;
+    }
+
+    free (TmapOutputs) ;
+
+    TmapOutputs = NULL ;
+    TmapOutputCount = 0u ;
+}
+
 static Error_t extract_message_bytes
 (
     NetworkMessage_t *message,
@@ -280,6 +309,180 @@ static Error_t request_tflp_slot_outputs
     return TDICE_SUCCESS ;
 }
 
+static char *build_tmap_geometry_file_name (char *file_name)
+{
+    char *last_slash = strrchr (file_name, '/') ;
+    char *last_dot   = strrchr (file_name, '.') ;
+
+    size_t file_name_length = strlen (file_name) ;
+    size_t suffix_length    = strlen (".coords") ;
+    size_t insert_offset    = file_name_length ;
+
+    if (last_dot != NULL && (last_slash == NULL || last_dot > last_slash))
+
+        insert_offset = (size_t) (last_dot - file_name) ;
+
+    char *geometry_file_name = (char *) malloc
+
+        (file_name_length + suffix_length + 1u) ;
+
+    if (geometry_file_name == NULL)
+
+        return NULL ;
+
+    memcpy (geometry_file_name, file_name, insert_offset) ;
+    memcpy (geometry_file_name + insert_offset, ".coords", suffix_length) ;
+    memcpy (geometry_file_name + insert_offset + suffix_length,
+            file_name + insert_offset,
+            file_name_length - insert_offset + 1u) ;
+
+    return geometry_file_name ;
+}
+
+static Error_t request_tmap_geometry_outputs (Socket_t *client_socket)
+{
+    NetworkMessage_t request, reply ;
+    Quantity_t nresults, result_index, word_index ;
+
+    free_tmap_output_metadata () ;
+
+    network_message_init (&request) ;
+    build_message_head   (&request, TDICE_SEND_OUTPUT_GEOMETRY) ;
+
+    if (send_message_to_socket (client_socket, &request) != TDICE_SUCCESS)
+    {
+        network_message_destroy (&request) ;
+
+        return TDICE_FAILURE ;
+    }
+
+    network_message_destroy (&request) ;
+
+    network_message_init (&reply) ;
+
+    if (receive_message_from_socket (client_socket, &reply) != TDICE_SUCCESS)
+    {
+        network_message_destroy (&reply) ;
+
+        return TDICE_FAILURE ;
+    }
+
+    extract_message_word (&reply, &nresults, 0) ;
+
+    if (nresults != 0u)
+    {
+        TmapOutputs = (TmapOutputMetadata_t *) calloc
+
+            (nresults, sizeof (TmapOutputMetadata_t)) ;
+
+        if (TmapOutputs == NULL)
+        {
+            network_message_destroy (&reply) ;
+
+            return TDICE_FAILURE ;
+        }
+
+        TmapOutputCount = nresults ;
+    }
+
+    word_index = 1u ;
+
+    for (result_index = 0u ; result_index != nresults ; result_index++)
+    {
+        TmapOutputMetadata_t *metadata = &TmapOutputs [result_index] ;
+        Quantity_t file_name_length, cell_index ;
+        CellIndex_t nrows, ncolumns ;
+        char *file_name ;
+        FILE *geometry_file ;
+
+        extract_message_word (&reply, &file_name_length, word_index++) ;
+        extract_message_word (&reply, &nrows,            word_index++) ;
+        extract_message_word (&reply, &ncolumns,         word_index++) ;
+
+        metadata->NRows    = nrows ;
+        metadata->NColumns = ncolumns ;
+        metadata->NCells   = (Quantity_t) nrows * (Quantity_t) ncolumns ;
+
+        file_name = (char *) malloc (file_name_length + 1u) ;
+
+        if (file_name == NULL)
+        {
+            network_message_destroy (&reply) ;
+            free_tmap_output_metadata () ;
+
+            return TDICE_FAILURE ;
+        }
+
+        if (extract_message_bytes
+            (&reply, &word_index, (unsigned char *) file_name, file_name_length) != TDICE_SUCCESS)
+        {
+            free (file_name) ;
+            network_message_destroy (&reply) ;
+            free_tmap_output_metadata () ;
+
+            return TDICE_FAILURE ;
+        }
+
+        file_name [file_name_length] = '\0' ;
+        metadata->FileName = file_name ;
+
+        metadata->GeometryFileName = build_tmap_geometry_file_name
+
+            (metadata->FileName) ;
+
+        if (metadata->GeometryFileName == NULL)
+        {
+            network_message_destroy (&reply) ;
+            free_tmap_output_metadata () ;
+
+            return TDICE_FAILURE ;
+        }
+
+        geometry_file = fopen (metadata->GeometryFileName, "w") ;
+
+        if (geometry_file == NULL)
+        {
+            fprintf (stderr,
+                "Cannot open client Tmap geometry file %s\n",
+                metadata->GeometryFileName) ;
+
+            network_message_destroy (&reply) ;
+            free_tmap_output_metadata () ;
+
+            return TDICE_FAILURE ;
+        }
+
+        fprintf (geometry_file,
+            "# nrows %u ncolumns %u\n",
+            (unsigned int) metadata->NRows,
+            (unsigned int) metadata->NColumns) ;
+        fprintf (geometry_file, "# left_x left_y length width\n") ;
+
+        for (cell_index = 0u ; cell_index != metadata->NCells ; cell_index++)
+        {
+            float left_x, left_y, cell_length, cell_width ;
+
+            extract_message_word (&reply, &left_x,      word_index++) ;
+            extract_message_word (&reply, &left_y,      word_index++) ;
+            extract_message_word (&reply, &cell_length, word_index++) ;
+            extract_message_word (&reply, &cell_width,  word_index++) ;
+
+            fprintf (geometry_file,
+                "%.6f %.6f %.6f %.6f\n",
+                left_x,
+                left_y,
+                cell_length,
+                cell_width) ;
+        }
+
+        fclose (geometry_file) ;
+    }
+
+    network_message_destroy (&reply) ;
+
+    return TDICE_SUCCESS ;
+}
+
 static void print_usage (char *exe_name)
 {
     fprintf (stderr,
@@ -371,12 +574,9 @@ int main (int argc, char** argv)
     OutputType_t     type ;
     OutputQuantity_t quantity ;
 
-    CellIndex_t row, column ;
-    CellIndex_t nrows, ncolumns ;
-
     float power, time, temperature ;
 
-    FILE *tmap, *power_trace ;
+    FILE *power_trace ;
 
     int follow_power_trace, terminate_on_sentinel, unlimited_slots, nslots_provided ;
     int option_start_index ;
@@ -534,14 +734,6 @@ int main (int argc, char** argv)
 
     fprintf (stdout, "done !\n") ;
 
-    /* Creates file for themal maps *******************************************/
-
-    tmap = fopen ("thermal_map.txt", "w") ;
-
-    if (tmap == NULL)
-
-        return EXIT_FAILURE ;
-
     /* Client-Server Communication ********************************************/
     /**************************************************************************/
 
@@ -554,6 +746,16 @@ int main (int argc, char** argv)
     extract_message_word (&client_nflp, &nflpel, 0) ;
 
     network_message_destroy (&client_nflp) ;
+
+    if (request_tmap_geometry_outputs (&client_socket) != TDICE_SUCCESS)
+    {
+        if (power_trace != NULL)
+            fclose (power_trace) ;
+
+        socket_close (&client_socket) ;
+
+        return EXIT_FAILURE ;
+    }
 
     for (slot_index = 0u ; unlimited_slots != 0 || nslots != 0u ; slot_index++)
     {
@@ -574,7 +776,6 @@ int main (int argc, char** argv)
                 {
                     network_message_destroy (&client_powers) ;
 
-                    fclose (tmap) ;
                     fclose (power_trace) ;
                     socket_close (&client_socket) ;
 
@@ -620,7 +821,6 @@ int main (int argc, char** argv)
         {
             network_message_destroy (&server_reply) ;
 
-            fclose (tmap) ;
             if (power_trace != NULL)
                 fclose (power_trace) ;
 
@@ -652,7 +852,6 @@ int main (int argc, char** argv)
         {
             network_message_destroy (&server_reply) ;
 
-            fclose (tmap) ;
             if (power_trace != NULL)
                 fclose (power_trace) ;
 
@@ -665,7 +864,6 @@ int main (int argc, char** argv)
 
         if (request_tflp_slot_outputs (&client_socket, slot_index) != TDICE_SUCCESS)
         {
-            fclose (tmap) ;
             if (power_trace != NULL)
                 fclose (power_trace) ;
 
@@ -735,22 +933,69 @@ int main (int argc, char** argv)
         extract_message_word (&server_reply, &time,     0) ;
         extract_message_word (&server_reply, &nresults, 1) ;
 
-        for (index = 2, index2 = 0 ; index2 != nresults ; index2++)
+        if (nresults != TmapOutputCount)
         {
-            extract_message_word (&server_reply, &nrows,    index++) ;
-            extract_message_word (&server_reply, &ncolumns, index++) ;
+            fprintf (stderr,
+                "Tmap output count mismatch: server sent %u results, "
+                "client has %u geometry entries\n",
+                (unsigned int) nresults,
+                (unsigned int) TmapOutputCount) ;
 
-            for (row = 0 ; row != nrows ; row++)
+            network_message_destroy (&server_reply) ;
+            if (power_trace != NULL)
+                fclose (power_trace) ;
+
+            free_tmap_output_metadata () ;
+            socket_close (&client_socket) ;
+
+            return EXIT_FAILURE ;
+        }
+
+        for (index = 2u, index2 = 0u ; index2 != nresults ; index2++)
+        {
+            TmapOutputMetadata_t *metadata = &TmapOutputs [index2] ;
+            Quantity_t cell_index ;
+            FILE *map_file ;
+
+            map_file = fopen (metadata->FileName, slot_index == 0u ? "w" : "a") ;
+
+            if (map_file == NULL)
             {
-                for (column = 0 ; column != ncolumns ; column++, index++)
-                {
-                    extract_message_word (&server_reply, &temperature, index) ;
+                fprintf (stderr,
+                    "Cannot open client Tmap output file %s\n",
+                    metadata->FileName) ;
 
-                    fprintf (tmap, "%5.2f ", temperature) ;
-                }
-                fprintf (tmap, "\n") ;
+                network_message_destroy (&server_reply) ;
+                if (power_trace != NULL)
+                    fclose (power_trace) ;
+
+                free_tmap_output_metadata () ;
+                socket_close (&client_socket) ;
+
+                return EXIT_FAILURE ;
             }
-            fprintf (tmap, "\n") ;
+
+            if (slot_index == 0u)
+
+                fprintf (map_file,
+                    "# nrows %u ncolumns %u\n",
+                    (unsigned int) metadata->NRows,
+                    (unsigned int) metadata->NColumns) ;
+
+            for (cell_index = 0u ; cell_index != metadata->NCells ; cell_index++, index++)
+            {
+                extract_message_word (&server_reply, &temperature, index) ;
+
+                if (cell_index != 0u)
+
+                    fprintf (map_file, " ") ;
+
+                fprintf (map_file, "%5.3f", temperature) ;
+            }
+
+            fprintf (map_file, "\n") ;
+
+            fclose (map_file) ;
         }
 
         network_message_destroy (&server_reply) ;
@@ -796,11 +1041,11 @@ int main (int argc, char** argv)
             nslots-- ;
     }
 
-    fclose (tmap) ;
-
     if (power_trace != NULL)
 
         fclose (power_trace) ;
+
+    free_tmap_output_metadata () ;
 
     /* Closes the simulation on the server ************************************/
 
